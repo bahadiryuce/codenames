@@ -1,0 +1,15 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec). Creates one Node web
+# service on the free plan. Review the plan and region before applying it.
+services:
+  - type: web
+    name: parola
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
