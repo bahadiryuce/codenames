@@ -96,7 +96,7 @@ The server reads the process environment directly; to load a file, run
 | `DATA_DIR` | `./data` | Where the room snapshot `rooms.json` is written. |
 | `PERSISTENCE` | `on` | `off` keeps rooms in memory only. |
 | `ALLOWED_ORIGINS` | empty | Extra browser origins allowed to open WebSockets (comma-separated). Same-origin is always allowed. |
-| `TRUST_PROXY` | `0` | Set `1` behind a reverse proxy so rate limiting uses `X-Forwarded-For`. |
+| `TRUST_PROXY` | `0` | Set `1` behind a reverse proxy so rate limiting uses the last `X-Forwarded-For` entry (the one the proxy adds). |
 
 There are no secrets in this project. Nothing in the client bundle comes from the environment.
 
@@ -258,12 +258,13 @@ board shows words uppercased with these rules (İSTANBUL, ILIK).
 
 ## Tests
 
-`npm test` runs 48 tests in 4 files (all passing at the time of writing):
+`npm test` runs 50 tests in 5 files (all passing at the time of writing):
 
 | File | Covers |
 | --- | --- |
 | `tests/engine.test.ts` | 9/8/7/1 key across 200 seeds for each starting team; 25 unique words; invalid boards rejected; word picking without replacement; valid/invalid clues; correct guess continues; bystander, opponent and assassin outcomes; voluntary end only after a guess; count + 1 limit; 0/unlimited; win on last own agent; win for the opponent when their last agent is revealed by mistake; turn switching; duplicate, out-of-range, stale and out-of-turn guesses leave state untouched |
 | `tests/text-and-clue.test.ts` | Turkish I/ı/İ/i, NFC, folding, name cleaning, every clue rule above, count validation, word pack integrity (≥ 500 Turkish words, no folded duplicates) |
+| `tests/proxy.test.ts` | Rate-limit IP behind a proxy comes from the last `X-Forwarded-For` entry, so client-supplied entries cannot spoof it |
 | `tests/views.test.ts` | Projection: operatives, spectators and outsiders get no unrevealed identity and no server-only fields; both spymasters get the key; revealed cards only; everyone sees the key after the end |
 | `tests/multiplayer.test.ts` | A real server with 5 independent Socket.IO clients: joining, invalid codes, duplicate names, full rooms, one spymaster per team, host-only controls, start conditions, actions from non-members, malformed payloads, hidden information in every payload received, a complete match to victory, assassin ending, out-of-turn/out-of-role rejections, locked seats, ignored forged fields, concurrent guesses on one card, disconnect/reconnect with fresh snapshots, session replacement, rematch with fresh words, return to lobby, chat, kick, host hand-over, restart with persisted rooms and no raw tokens on disk |
 
@@ -287,8 +288,9 @@ store and sticky sessions, which this project does not implement.
 
 1. Push the project to a GitHub repository.
 2. In Render, choose **New → Blueprint**, select the repository; [`render.yaml`](render.yaml)
-   defines a free web service (`npm ci --include=dev && npm run build`, `npm start`, health check
-   `/healthz`, `TRUST_PROXY=1`). Or create a **Web Service** by hand with the same commands.
+   defines a free web service in the Frankfurt region (`npm ci --include=dev && npm run build`,
+   `npm start`, health check `/healthz`, `TRUST_PROXY=1`). Or create a **Web Service** by hand
+   with the same commands.
 3. Open the `onrender.com` URL Render gives you and share room links from there.
 
 Free-plan behaviour (check Render's current documentation; terms change): the service sleeps

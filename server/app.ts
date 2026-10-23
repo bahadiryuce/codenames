@@ -104,6 +104,19 @@ function makeStaticHandler(staticDir: string | null) {
   };
 }
 
+/**
+ * Client IP as seen by the trusted reverse proxy in front of us: the last
+ * X-Forwarded-For entry. Earlier entries come from the client and can be forged,
+ * so using the first one would let anyone dodge the per-IP rate limits.
+ */
+export function forwardedClientIp(header: string | string[] | undefined): string | null {
+  const entries = (Array.isArray(header) ? header.join(',') : (header ?? ''))
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return entries.at(-1) ?? null;
+}
+
 export interface GameServer {
   port: number;
   store: RoomStore;
@@ -198,9 +211,8 @@ export async function startGameServer(opts: GameServerOptions = {}): Promise<Gam
 
   const clientIp = (socket: GameSocket): string => {
     if (opts.trustProxy) {
-      const fwd = socket.handshake.headers['x-forwarded-for'];
-      const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-      if (first) return first;
+      const forwarded = forwardedClientIp(socket.handshake.headers['x-forwarded-for']);
+      if (forwarded) return forwarded;
     }
     return socket.handshake.address;
   };
