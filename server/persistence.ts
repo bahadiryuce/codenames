@@ -43,7 +43,17 @@ export class SnapshotStore {
           ...r,
           chat: [],
           chatSeq: r.chatSeq ?? 0,
-          players: r.players.map((p) => ({ ...p, connected: false })),
+          // Fields added after format v1 was introduced get defaults.
+          settings: { ...r.settings, intro: r.settings?.intro ?? true },
+          teamNames: r.teamNames ?? { red: null, blue: null },
+          intro: r.intro ?? null,
+          match: r.match ? { ...r.match, marks: r.match.marks ?? {} } : null,
+          players: r.players.map((p) => ({
+            ...p,
+            introStyle: p.introStyle ?? 'klasik',
+            tagline: p.tagline ?? '',
+            connected: false,
+          })),
         }));
     } catch (e) {
       console.error('[persistence] snapshot unreadable, starting empty:', (e as Error).message);

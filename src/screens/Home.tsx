@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { cleanName } from '../../shared/text';
 import type { Language } from '../../shared/types';
 import { RulesDialog } from '../components/RulesDialog';
-import { Button, Glyph, LangToggle, useStrings, Wordmark } from '../components/ui';
+import { Backdrop, Button, Glyph, LangToggle, useStrings, Wordmark } from '../components/ui';
 import { createRoom, joinRoom, rememberedSession, resumeSession, savedName, useApp, type ClientError } from '../store';
 
 const CODE_RE = /^[A-Z2-9]{6}$/;
@@ -67,6 +67,7 @@ export function Home({ inviteCode }: { inviteCode: string | null }) {
 
   return (
     <div className="home">
+      <Backdrop tone="red" />
       <header className="home__top">
         <Button variant="ghost" size="sm" onClick={() => setRulesOpen(true)}>
           {s.howToPlay}
@@ -97,7 +98,7 @@ export function Home({ inviteCode }: { inviteCode: string | null }) {
           </div>
         </section>
 
-        <section className="home__panel panel" aria-label={inviteCode ? s.joinRoom : s.createRoom}>
+        <section className="home__panel card" aria-label={inviteCode ? s.joinRoom : s.createRoom}>
           {remembered ? (
             <div className="resume-box">
               <p>{s.resumeAs(remembered.name)}</p>
@@ -187,7 +188,7 @@ export function Home({ inviteCode }: { inviteCode: string | null }) {
       </main>
 
       <footer className="home__footer">
-        <span>{uiLang === 'tr' ? 'Ücretsiz ve reklamsız bir parti oyunu.' : 'A free, ad-free party game.'}</span>
+        <span>{s.footer}</span>
       </footer>
       <RulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </div>

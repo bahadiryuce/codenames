@@ -1,9 +1,14 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { createMatch, endTurn, giveClue, guess, pickWords, type GuessOutcome, type RandomInt } from '../shared/engine';
+import { createMatch, endTurn, giveClue, guess, pickWords, toggleMark, type GuessOutcome, type RandomInt } from '../shared/engine';
 import { cleanName, foldWord } from '../shared/text';
 import {
+  INTRO_STYLES,
+  TAGLINE_MAX,
   TEAMS,
+  TEAM_NAME_MAX,
   type ChatMessage,
+  type IntroStyle,
+  type IntroView,
   type ClueCount,
   type ErrorCode,
   type Language,
@@ -36,6 +41,8 @@ export interface Player {
   connected: boolean;
   joinedAt: number;
   lastSeen: number;
+  introStyle: IntroStyle;
+  tagline: string;
 }
 
 export interface Room {
@@ -50,6 +57,9 @@ export interface Room {
   /** Players who have held the key card during the current match; their seat is locked. */
   keyViewers: string[];
   recentWords: string[];
+  teamNames: Record<Team, string | null>;
+  /** Introduction sequence, when running (lobby only). */
+  intro: IntroView | null;
   chat: ChatMessage[];
   chatSeq: number;
   revision: number;
@@ -85,6 +95,11 @@ export function startCheck(room: Room): { ok: true } | { ok: false; reason: Erro
   }
   if (room.players.filter((p) => p.team !== null).length < MIN_PLAYERS) return { ok: false, reason: 'NOT_ENOUGH_PLAYERS' };
   return { ok: true };
+}
+
+/** One line of free text: NFC, no control/format characters, collapsed whitespace. */
+function cleanLine(raw: string): string {
+  return raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\s+/g, ' ').trim();
 }
 
 export interface NewSession {
@@ -126,6 +141,8 @@ export class RoomStore {
         connected: true,
         joinedAt: now,
         lastSeen: now,
+        introStyle: 'klasik',
+        tagline: '',
       },
     };
   }
@@ -147,11 +164,13 @@ export class RoomStore {
       lastActivity: now,
       hostId: player.id,
       players: [player],
-      settings: { language: lang, startingTeam: 'random' },
+      settings: { language: lang, startingTeam: 'random', intro: true },
       match: null,
       matchNumber: 0,
       keyViewers: [],
       recentWords: [],
+      teamNames: { red: null, blue: null },
+      intro: null,
       chat: [],
       chatSeq: 0,
       revision: 1,
@@ -212,6 +231,17 @@ export class RoomStore {
     const idx = room.players.findIndex((p) => p.id === playerId);
     if (idx < 0) return err('NOT_IN_ROOM');
     room.players.splice(idx, 1);
+    if (room.intro) {
+      for (const v of Object.values(room.intro.votes)) {
+        v.up = v.up.filter((id) => id !== playerId);
+        v.down = v.down.filter((id) => id !== playerId);
+      }
+      delete room.intro.votes[playerId];
+      if (room.intro.currentId === playerId) {
+        room.intro.stage = 'list';
+        room.intro.currentId = null;
+      }
+    }
     if (room.players.length === 0) {
       this.rooms.delete(room.code);
       return ok({ roomClosed: true });
@@ -280,6 +310,10 @@ export class RoomStore {
       if (p.language !== 'tr' && p.language !== 'en') return err('BAD_REQUEST');
       next.language = p.language;
     }
+    if ('intro' in p) {
+      if (typeof p.intro !== 'boolean') return err('BAD_REQUEST');
+      next.intro = p.intro;
+    }
     if ('startingTeam' in p) {
       if (p.startingTeam !== 'random' && p.startingTeam !== 'red' && p.startingTeam !== 'blue') return err('BAD_REQUEST');
       next.startingTeam = p.startingTeam;
@@ -340,6 +374,7 @@ export class RoomStore {
     room.match = createMatch({ words, startingTeam, language: room.settings.language, rand: this.rand, now: this.clock() });
     room.recentWords = [...words, ...room.recentWords].slice(0, RECENT_WORDS_LIMIT);
     room.matchNumber += 1;
+    room.intro = null;
     room.keyViewers = room.players.filter((p) => p.role === 'spymaster').map((p) => p.id);
     this.touch(room);
     return ok(undefined, [{ kind: 'match_started', startingTeam }]);
@@ -392,10 +427,143 @@ export class RoomStore {
   endTurn(room: Room, playerId: string, clueId: unknown): Result {
     const ctx = this.activeMatch(room, playerId, 'operative');
     if (!ctx.ok) return ctx;
-    const res = endTurn(ctx.value.match, ctx.value.team, clueId, this.clock());
+    const res = endTurn(ctx.value.match, ctx.value.team, clueId, this.clock(), ctx.value.player.name);
     if (!res.ok) return res;
     this.touch(room);
     return ok(undefined, [{ kind: 'turn', team: ctx.value.match.turn, reason: 'voluntary' }]);
+  }
+
+  mark(room: Room, playerId: string, index: unknown, clueId: unknown): Result<{ marked: boolean }> {
+    const ctx = this.activeMatch(room, playerId, 'operative');
+    if (!ctx.ok) return ctx;
+    const res = toggleMark(ctx.value.match, ctx.value.team, playerId, index, clueId);
+    if (!res.ok) return res;
+    this.touch(room);
+    return ok(res.value);
+  }
+
+  /** Name, introduction style and one-line introduction. Each field is optional. */
+  profile(room: Room, playerId: string, patch: Record<string, unknown>): Result {
+    const player = this.member(room, playerId);
+    if (!player) return err('NOT_IN_ROOM');
+    let { name, introStyle, tagline } = player;
+    if ('name' in patch) {
+      const n = cleanName(patch.name);
+      if (!n) return err('NAME_INVALID');
+      const folded = foldWord(n, 'tr');
+      if (room.players.some((p) => p.id !== playerId && foldWord(p.name, 'tr') === folded)) return err('NAME_TAKEN');
+      name = n;
+    }
+    if ('introStyle' in patch) {
+      if (!INTRO_STYLES.includes(patch.introStyle as IntroStyle)) return err('BAD_REQUEST');
+      introStyle = patch.introStyle as IntroStyle;
+    }
+    if ('tagline' in patch) {
+      if (typeof patch.tagline !== 'string') return err('TAGLINE_INVALID');
+      const t = cleanLine(patch.tagline);
+      if ([...t].length > TAGLINE_MAX) return err('TAGLINE_INVALID');
+      tagline = t;
+    }
+    if (name === player.name && introStyle === player.introStyle && tagline === player.tagline) return ok(undefined);
+    Object.assign(player, { name, introStyle, tagline });
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  /**
+   * A team names itself: only members of that team may rename it, and not while a
+   * match is running. An empty name restores the default.
+   */
+  renameTeam(room: Room, playerId: string, team: unknown, rawName: unknown): Result {
+    const player = this.member(room, playerId);
+    if (!player) return err('NOT_IN_ROOM');
+    if (team !== 'red' && team !== 'blue') return err('BAD_REQUEST');
+    if (player.team !== team) return err('NOT_ON_TEAM');
+    if (isMatchActive(room)) return err('MATCH_IN_PROGRESS');
+    if (typeof rawName !== 'string') return err('TEAM_NAME_INVALID');
+    const cleaned = cleanLine(rawName);
+    if ([...cleaned].length > TEAM_NAME_MAX) return err('TEAM_NAME_INVALID');
+    const name = cleaned.length ? cleaned : null;
+    const other = room.teamNames[team === 'red' ? 'blue' : 'red'];
+    if (name && other && foldWord(name, 'tr') === foldWord(other, 'tr')) return err('TEAM_NAME_TAKEN');
+    if (room.teamNames[team] === name) return ok(undefined);
+    room.teamNames = { ...room.teamNames, [team]: name };
+    this.touch(room);
+    return ok(undefined, [{ kind: 'team_renamed', team, name }]);
+  }
+
+  // ----- Introduction sequence (host-driven, lobby only) -----
+
+  private introCtx(room: Room, actorId: string, hostOnly: boolean): Result<IntroView> {
+    if (!this.member(room, actorId)) return err('NOT_IN_ROOM');
+    if (hostOnly && room.hostId !== actorId) return err('NOT_HOST');
+    if (!room.intro) return err('INTRO_NOT_ACTIVE');
+    return ok(room.intro);
+  }
+
+  beginIntro(room: Room, actorId: string): Result {
+    const host = this.hostOnly(room, actorId);
+    if (!host.ok) return host;
+    if (isMatchActive(room)) return err('MATCH_IN_PROGRESS');
+    if (room.intro) return err('INTRO_IN_PROGRESS');
+    room.intro = { stage: 'list', currentId: null, votes: {}, presented: [] };
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  presentIntro(room: Room, actorId: string, targetId: unknown): Result {
+    const ctx = this.introCtx(room, actorId, true);
+    if (!ctx.ok) return ctx;
+    const target = typeof targetId === 'string' ? this.member(room, targetId) : undefined;
+    if (!target) return err('PLAYER_NOT_FOUND');
+    ctx.value.stage = 'showing';
+    ctx.value.currentId = target.id;
+    ctx.value.votes[target.id] = { up: [], down: [] };
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  voteIntro(room: Room, actorId: string, value: unknown): Result {
+    const ctx = this.introCtx(room, actorId, false);
+    if (!ctx.ok) return ctx;
+    const intro = ctx.value;
+    if (intro.stage !== 'showing' || !intro.currentId) return err('WRONG_PHASE');
+    if (value !== 'up' && value !== 'down') return err('BAD_REQUEST');
+    if (intro.currentId === actorId) return err('CANNOT_VOTE_SELF');
+    const votes = (intro.votes[intro.currentId] ??= { up: [], down: [] });
+    votes.up = votes.up.filter((id) => id !== actorId);
+    votes.down = votes.down.filter((id) => id !== actorId);
+    votes[value].push(actorId);
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  finishIntro(room: Room, actorId: string): Result {
+    const ctx = this.introCtx(room, actorId, true);
+    if (!ctx.ok) return ctx;
+    const intro = ctx.value;
+    if (intro.stage !== 'showing' || !intro.currentId) return err('WRONG_PHASE');
+    intro.stage = 'result';
+    if (!intro.presented.includes(intro.currentId)) intro.presented.push(intro.currentId);
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  introBack(room: Room, actorId: string): Result {
+    const ctx = this.introCtx(room, actorId, true);
+    if (!ctx.ok) return ctx;
+    ctx.value.stage = 'list';
+    ctx.value.currentId = null;
+    this.touch(room);
+    return ok(undefined);
+  }
+
+  endIntro(room: Room, actorId: string): Result {
+    const ctx = this.introCtx(room, actorId, true);
+    if (!ctx.ok) return ctx;
+    room.intro = null;
+    this.touch(room);
+    return ok(undefined);
   }
 
   chat(room: Room, playerId: string, rawText: unknown): Result {

@@ -330,6 +330,15 @@ export async function startGameServer(opts: GameServerOptions = {}): Promise<Gam
     action('game:guess', (room, id, p) => store.guess(room, id, p.index, p.clueId));
     action('game:endTurn', (room, id, p) => store.endTurn(room, id, p.clueId));
     action('chat:send', (room, id, p) => store.chat(room, id, p.text));
+    action('player:profile', (room, id, p) => store.profile(room, id, p));
+    action('team:rename', (room, id, p) => store.renameTeam(room, id, p.team, p.name));
+    action('game:mark', (room, id, p) => store.mark(room, id, p.index, p.clueId));
+    action('intro:begin', (room, id) => store.beginIntro(room, id));
+    action('intro:present', (room, id, p) => store.presentIntro(room, id, p.playerId));
+    action('intro:vote', (room, id, p) => store.voteIntro(room, id, p.value));
+    action('intro:finish', (room, id) => store.finishIntro(room, id));
+    action('intro:back', (room, id) => store.introBack(room, id));
+    action('intro:end', (room, id) => store.endIntro(room, id));
 
     socket.on('disconnect', () => unbind(socket));
   });

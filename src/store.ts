@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { toUpper } from '../shared/text';
 import type { Ack, ClientToServerEvents, ErrorCode, Notice, RoomView, ServerToClientEvents, SessionInfo } from '../shared/types';
 import { STRINGS, type UiLang } from './i18n';
+import { teamName } from './teams';
 
 // Client state: one socket, the latest server snapshot, and UI-level flags. The
 // client never derives game state itself; it renders whatever the server last sent.
@@ -252,23 +253,22 @@ socket.on('room:notice', (notice) => {
   const room = state.room;
   const lang = room?.match?.language ?? room?.settings.language ?? 'tr';
   const up = (w: string) => upper(w, lang);
+  // Turn changes, clues, match start and match end have their own on-screen
+  // overlays, so only events without one get a toast.
   switch (notice.kind) {
-    case 'reveal':
-      toast(s.noticeReveal(notice.by, up(notice.word), s.identity[notice.identity]), notice.identity === 'red' || notice.identity === 'blue' ? notice.identity : 'info');
+    case 'reveal': {
+      const id = notice.identity;
+      const label = id === 'red' || id === 'blue' ? s.agentOf(teamName(room, id, s)) : s.identity[id];
+      toast(s.noticeReveal(notice.by, up(notice.word), label), id === 'red' || id === 'blue' ? id : id === 'assassin' ? 'error' : 'info');
       break;
-    case 'clue':
-      toast(s.noticeClue(notice.team, up(notice.word), notice.count === 'unlimited' ? '∞' : String(notice.count)), notice.team);
-      break;
-    case 'turn':
-      toast(s.noticeTurn(notice.team, notice.reason), notice.team);
-      break;
-    case 'match_started':
-      toast(s.noticeStart(notice.startingTeam), notice.startingTeam);
-      break;
-    case 'match_over':
-      break; // the end-of-match dialog covers it
+    }
     case 'host_changed':
       toast(s.noticeHost(notice.name));
+      break;
+    case 'team_renamed':
+      toast(s.noticeTeamRenamed(s.colorName[notice.team], notice.name ?? s.defaultTeamName[notice.team]), notice.team);
+      break;
+    default:
       break;
   }
 });

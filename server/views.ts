@@ -33,7 +33,7 @@ export function keyCards(match: MatchState): KeyCardView[] {
   return match.cards.map((c) => ({ word: c.word, revealed: c.revealed, identity: c.identity }));
 }
 
-export function matchView(match: MatchState, viewer: Player | null): MatchView {
+export function matchView(match: MatchState, viewer: Player | null, nameOf: (id: string) => string = (id) => id): MatchView {
   const clue: ClueView | null = match.clue
     ? {
         id: match.clue.id,
@@ -62,6 +62,7 @@ export function matchView(match: MatchState, viewer: Player | null): MatchView {
     startedAt: match.startedAt,
     finishedAt: match.finishedAt,
     stats,
+    marks: match.cards.map((_, i) => (match.marks?.[i] ?? []).map(nameOf)),
   };
   return canSeeKey(match, viewer)
     ? { ...base, visibility: 'key', cards: keyCards(match) }
@@ -77,16 +78,29 @@ export function roomView(room: Room, viewerId: string): RoomView {
     role: p.role,
     connected: p.connected,
     isHost: p.id === room.hostId,
+    introStyle: p.introStyle,
+    tagline: p.tagline,
   }));
+  const nameOf = (id: string) => room.players.find((p) => p.id === id)?.name ?? '?';
+  const intro = room.intro;
   return {
     code: room.code,
     revision: room.revision,
     youId: viewerId,
     hostId: room.hostId,
     players,
-    settings: { language: room.settings.language, startingTeam: room.settings.startingTeam },
+    settings: { language: room.settings.language, startingTeam: room.settings.startingTeam, intro: room.settings.intro },
     matchNumber: room.matchNumber,
-    match: room.match ? matchView(room.match, viewer) : null,
+    match: room.match ? matchView(room.match, viewer, nameOf) : null,
+    teamNames: { red: room.teamNames.red, blue: room.teamNames.blue },
+    intro: intro
+      ? {
+          stage: intro.stage,
+          currentId: intro.currentId,
+          votes: Object.fromEntries(Object.entries(intro.votes).map(([id, v]) => [id, { up: [...v.up], down: [...v.down] }])),
+          presented: [...intro.presented],
+        }
+      : null,
     chat: room.chat.map((m) => ({ ...m })),
     startCheck: startCheck(room),
   };

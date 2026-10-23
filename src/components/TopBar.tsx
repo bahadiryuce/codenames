@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import type { PlayerView, RoomView } from '../../shared/types';
-import { leaveRoom, toast } from '../store';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import type { RoomView } from '../../shared/types';
+import { act, leaveRoom, toast } from '../store';
+import { teamName } from '../teams';
 import { RulesDialog } from './RulesDialog';
-import { Button, ConfirmDialog, Dialog, LangToggle, useStrings, Wordmark } from './ui';
+import { Button, ConfirmDialog, Dialog, Icon, LangToggle, useStrings, Wordmark } from './ui';
 
 export function inviteUrl(code: string): string {
   return `${location.origin}/r/${code}`;
@@ -17,61 +18,143 @@ export async function copyInvite(code: string, s: ReturnType<typeof useStrings>)
   }
 }
 
-export function RoleChip({ me }: { me: PlayerView | undefined }) {
+/** Room code, masked by default (streamer-friendly), with reveal and copy-link actions. */
+export function CodeChip({ code, label }: { code: string; label: string }) {
   const s = useStrings();
-  if (!me) return null;
-  const label = me.team ? `${s.team[me.team]} · ${me.role === 'spymaster' ? s.spymaster : s.operative}` : s.spectator;
+  const [show, setShow] = useState(false);
   return (
-    <span className={`role-chip role-chip--${me.team ?? 'none'}`} title={s.yourRole}>
-      <span className="role-chip__dot" aria-hidden />
-      {label}
+    <span className="code-chip">
+      <span className="code-chip__label">{label}</span>
+      <span className="code-chip__code" aria-label={show ? code : s.roomCode}>
+        {show ? code : '••••••'}
+      </span>
+      <button type="button" className="icon-btn" aria-label={show ? s.hideCode : s.showCode} aria-pressed={show} onClick={() => setShow((v) => !v)}>
+        <Icon name={show ? 'eyeOff' : 'eye'} />
+      </button>
+      <button type="button" className="icon-btn" aria-label={s.copyLink} title={s.copyLink} onClick={() => void copyInvite(code, s)}>
+        <Icon name="copy" />
+      </button>
     </span>
   );
 }
 
-export function TopBar({ room, extra }: { room: RoomView; extra?: React.ReactNode }) {
+function RenameDialog({ open, onClose, current }: { open: boolean; onClose: () => void; current: string }) {
+  const s = useStrings();
+  const [name, setName] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const ok = await act('player:profile', { name });
+    setBusy(false);
+    if (ok) onClose();
+  };
+  return (
+    <Dialog open={open} onClose={onClose} title={s.renameTitle} labelledBy="rename-title" className="dialog--small">
+      <form className="stack" onSubmit={submit}>
+        <input className="input" value={name} maxLength={20} autoFocus onChange={(e) => setName(e.target.value)} aria-label={s.yourName} />
+        <div className="dialog__actions">
+          <Button variant="ghost" onClick={onClose}>
+            {s.cancel}
+          </Button>
+          <Button type="submit" variant="primary" busy={busy}>
+            {s.save}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+export function RoomBar({ room, mode, center, onZoom }: { room: RoomView; mode: 'lobby' | 'intro' | 'game'; center?: ReactNode; onZoom?: () => void }) {
   const s = useStrings();
   const [rulesOpen, setRulesOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const me = room.players.find((p) => p.id === room.youId);
+  const match = room.match;
+  const status = mode === 'lobby' ? s.inLobby : mode === 'intro' ? s.inIntro : s.inGame;
+
+  const actions = (
+    <>
+      <Button variant="ghost" size="sm" icon="pencil" onClick={() => setRenameOpen(true)}>
+        {s.rename}
+      </Button>
+      <Button variant="ghost" size="sm" icon="book" onClick={() => setRulesOpen(true)}>
+        {s.rules}
+      </Button>
+    </>
+  );
+
   return (
-    <header className="topbar">
-      <div className="topbar__left">
+    <header className={`roombar roombar--${mode}`}>
+      <div className="roombar__left">
         <Wordmark />
-        <button type="button" className="code-chip" onClick={() => void copyInvite(room.code, s)} title={s.copyLink}>
-          <span className="code-chip__label">{s.roomCode}</span>
-          <span className="code-chip__code">{room.code}</span>
-          <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden>
-            <rect x="6" y="6" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M13 3H5a2 2 0 0 0-2 2v8" fill="none" stroke="currentColor" strokeWidth="1.8" />
-          </svg>
+        {mode === 'game' ? (
+          <CodeChip code={room.code} label={s.roomCode} />
+        ) : (
+          <>
+            <span className="status-pill">
+              <span className="status-pill__dot" aria-hidden />
+              {status}
+            </span>
+            <span className="roombar__count">
+              <Icon name="users" /> {s.playersCount(room.players.length)}
+            </span>
+          </>
+        )}
+      </div>
+
+      <div className="roombar__center">
+        {mode === 'game' ? (
+          <div className="glassbar">
+            {actions}
+            <span className="glassbar__item">
+              <Icon name="users" /> {room.players.length}
+            </span>
+            {onZoom ? (
+              <Button variant="ghost" size="sm" icon="zoom" onClick={onZoom} className="hide-sm">
+                {s.zoom}
+              </Button>
+            ) : null}
+            {match && match.phase !== 'finished' ? (
+              <span className={`glassbar__item next-team next-team--${match.turn}`}>
+                <span className="next-team__dot" aria-hidden />
+                <span className="muted hide-sm">{s.nextTeam}:</span> <strong>{teamName(room, match.turn, s)}</strong>
+              </span>
+            ) : null}
+            {center}
+          </div>
+        ) : (
+          <CodeChip code={room.code} label={s.roomCodeShort} />
+        )}
+      </div>
+
+      <div className="roombar__right">
+        {mode !== 'game' ? <span className="roombar__actions">{actions}</span> : null}
+        <LangToggle />
+        <Button variant={mode === 'game' ? 'ghost' : 'danger'} size="sm" icon="exit" onClick={() => setLeaveOpen(true)} className="roombar__leave">
+          {mode === 'game' ? s.exit : s.leaveRoom}
+        </Button>
+        <button type="button" className="icon-btn roombar__menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}>
+          <Icon name="menu" size={20} />
         </button>
       </div>
-      <div className="topbar__right">
-        <RoleChip me={me} />
-        <div className="topbar__actions">
-          {extra}
-          <Button variant="ghost" size="sm" onClick={() => setRulesOpen(true)}>
+
+      <Dialog open={menuOpen} onClose={() => setMenuOpen(false)} title={s.menu} labelledBy="roombar-menu" className="dialog--small">
+        <div className="menu-list" onClick={(e) => (e.target as HTMLElement).closest('button.btn') && setMenuOpen(false)}>
+          <Button icon="link" onClick={() => void copyInvite(room.code, s)}>
+            {s.copyLink}
+          </Button>
+          <Button icon="pencil" onClick={() => setRenameOpen(true)}>
+            {s.renameTitle}
+          </Button>
+          <Button icon="book" onClick={() => setRulesOpen(true)}>
             {s.rules}
           </Button>
-          <LangToggle />
-          <Button variant="ghost" size="sm" onClick={() => setLeaveOpen(true)}>
-            {s.leaveRoom}
-          </Button>
-        </div>
-        <button type="button" className="player__menu-btn topbar__menu-btn" aria-label={s.menu} onClick={() => setMenuOpen(true)}>
-          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
-            <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-      <Dialog open={menuOpen} onClose={() => setMenuOpen(false)} title={s.menu} labelledBy="topbar-menu" className="dialog--small">
-        <div className="topbar-menu" onClick={(e) => (e.target as HTMLElement).closest('button.btn') && setMenuOpen(false)}>
-          <Button onClick={() => void copyInvite(room.code, s)}>{s.copyLink}</Button>
-          <Button onClick={() => setRulesOpen(true)}>{s.rules}</Button>
-          {extra}
-          <Button variant="danger" onClick={() => setLeaveOpen(true)}>
+          {center}
+          <Button variant="danger" icon="exit" onClick={() => setLeaveOpen(true)}>
             {s.leaveRoom}
           </Button>
         </div>
@@ -83,6 +166,7 @@ export function TopBar({ room, extra }: { room: RoomView; extra?: React.ReactNod
         </div>
       </Dialog>
       <RulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
+      {renameOpen ? <RenameDialog open onClose={() => setRenameOpen(false)} current={me?.name ?? ''} /> : null}
       <ConfirmDialog
         open={leaveOpen}
         text={s.leaveConfirm}

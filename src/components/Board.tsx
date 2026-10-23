@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Identity, MatchView } from '../../shared/types';
 import { act, upper } from '../store';
-import { Glyph, useStrings } from './ui';
+import { CardArt } from './CardArt';
+import { AgentMark, Icon, useStrings } from './ui';
 
 interface CardData {
   word: string;
@@ -11,7 +12,19 @@ interface CardData {
 
 const COLS = 5;
 
-export function Board({ match, canGuess, isSpymaster }: { match: MatchView; canGuess: boolean; isSpymaster: boolean }) {
+export function Board({
+  match,
+  canGuess,
+  isSpymaster,
+  identityLabel,
+  myName,
+}: {
+  match: MatchView;
+  canGuess: boolean;
+  isSpymaster: boolean;
+  identityLabel: (id: Identity) => string;
+  myName: string;
+}) {
   const s = useStrings();
   const [selected, setSelected] = useState<number | null>(null);
   const [pending, setPending] = useState<number | null>(null);
@@ -74,48 +87,77 @@ export function Board({ match, canGuess, isSpymaster }: { match: MatchView; canG
         const selectable = canGuess && !card.revealed && pending === null;
         const isSelected = selected === i;
         const id = card.identity;
+        const marks = match.marks?.[i] ?? [];
+        const iMarked = marks.includes(myName);
+        const tone = card.revealed ? id : id ?? 'down';
         const classes = [
-          'card',
-          card.revealed ? `card--revealed card--${id}` : 'card--down',
-          !card.revealed && id ? `card--key card--key-${id}` : '',
-          selectable ? 'card--selectable' : '',
-          isSelected ? 'card--selected' : '',
-          pending === i ? 'card--pending' : '',
+          'wcard',
+          `wcard--${card.revealed ? `open-${id}` : id ? `key-${id}` : 'down'}`,
+          card.revealed ? 'wcard--revealed' : '',
+          selectable ? 'wcard--selectable' : '',
+          isSelected ? 'wcard--selected' : '',
+          pending === i ? 'wcard--pending' : '',
+          marks.length ? 'wcard--marked' : '',
         ].join(' ');
-        const status = card.revealed ? `${s.identity[id!]}` : id ? `${s.identity[id]}, ${s.hidden.toLowerCase()}` : s.hidden;
+        const status = card.revealed ? identityLabel(id!) : id ? `${identityLabel(id)}, ${s.hidden.toLowerCase()}` : s.hidden;
         return (
-          <button
-            key={i}
-            ref={(el) => {
-              refs.current[i] = el;
-            }}
-            type="button"
-            className={classes}
-            style={{ ['--chars' as string]: Math.max(5, [...word].length) }}
-            tabIndex={focus === i ? 0 : -1}
-            aria-disabled={!selectable}
-            aria-pressed={canGuess ? isSelected : undefined}
-            aria-label={`${word}. ${status}. ${isSelected ? s.selectedAria(word) : selectable ? s.revealAria(word) : ''}`}
-            onFocus={() => setFocus(i)}
-            onClick={() => onActivate(i)}
-          >
-            <span className="card__inner">
-              {id ? (
-                <span className="card__mark">
-                  <Glyph identity={id} size={card.revealed ? 22 : 13} />
+          <div key={i} className={classes} data-tone={tone}>
+            <button
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
+              type="button"
+              className="wcard__face"
+              style={{ ['--chars' as string]: Math.max(5, [...word].length) }}
+              tabIndex={focus === i ? 0 : -1}
+              aria-disabled={!selectable}
+              aria-pressed={canGuess ? isSelected : undefined}
+              aria-label={`${word}. ${status}.${marks.length ? ` ${marks.join(', ')}.` : ''} ${isSelected ? s.selectedAria(word) : selectable ? s.revealAria(word) : ''}`}
+              onFocus={() => setFocus(i)}
+              onClick={() => onActivate(i)}
+            >
+              {card.revealed && id ? (
+                <CardArt identity={id} seed={i} />
+              ) : (
+                <span className="wcard__mark" aria-hidden>
+                  <AgentMark size={18} />
+                  <span>PAROLA</span>
+                </span>
+              )}
+              <span className="wcard__plate">
+                <span className="wcard__word" lang={match.language}>
+                  {word}
+                </span>
+              </span>
+              {isSelected ? (
+                <span className="wcard__confirm" aria-hidden>
+                  {s.confirmReveal}
                 </span>
               ) : null}
-              <span className="card__word" lang={match.language}>
-                {word}
-              </span>
-            </span>
-            {isSelected ? (
-              <span className="card__confirm" aria-hidden>
-                {s.confirmReveal}
+              {pending === i ? <span className="wcard__spinner spinner" aria-hidden /> : null}
+            </button>
+            {canGuess && !card.revealed ? (
+              <button
+                type="button"
+                className={`wcard__check ${iMarked ? 'is-on' : ''}`}
+                aria-label={`${iMarked ? s.unmark : s.mark}: ${word}`}
+                aria-pressed={iMarked}
+                onClick={() => clueId !== null && void act('game:mark', { index: i, clueId })}
+              >
+                <Icon name="check" size={12} />
+              </button>
+            ) : null}
+            {marks.length ? (
+              <span className="wcard__tags" aria-hidden>
+                {marks.slice(0, 2).map((n) => (
+                  <span key={n} className="wcard__tag">
+                    {n}
+                  </span>
+                ))}
+                {marks.length > 2 ? <span className="wcard__tag">+{marks.length - 2}</span> : null}
               </span>
             ) : null}
-            {pending === i ? <span className="card__spinner spinner" aria-hidden /> : null}
-          </button>
+          </div>
         );
       })}
     </div>

@@ -90,6 +90,7 @@ export function createMatch(opts: {
     winReason: null,
     startedAt: now,
     finishedAt: null,
+    marks: {},
   };
 }
 
@@ -109,12 +110,13 @@ export function unrevealedWords(match: MatchState): string[] {
   return match.cards.filter((c) => !c.revealed).map((c) => c.word);
 }
 
-function switchTurn(match: MatchState, reason: TurnEndReason, now: number): void {
-  match.log.push({ kind: 'turn_end', turn: match.turnNumber, team: match.turn, reason, at: now });
+function switchTurn(match: MatchState, reason: TurnEndReason, now: number, by?: string): void {
+  match.log.push({ kind: 'turn_end', turn: match.turnNumber, team: match.turn, reason, at: now, ...(by ? { by } : {}) });
   match.turn = otherTeam(match.turn);
   match.turnNumber += 1;
   match.phase = 'clue';
   match.clue = null;
+  match.marks = {};
 }
 
 function finish(match: MatchState, winner: Team, reason: WinReason, now: number): void {
@@ -123,6 +125,7 @@ function finish(match: MatchState, winner: Team, reason: WinReason, now: number)
   match.winReason = reason;
   match.finishedAt = now;
   match.clue = null;
+  match.marks = {};
   match.log.push({ kind: 'game_over', turn: match.turnNumber, winner, reason, at: now });
 }
 
@@ -182,6 +185,7 @@ export function guess(
   if (card.revealed) return fail('CARD_REVEALED');
 
   card.revealed = true;
+  delete match.marks[index];
   card.revealedBy = team;
   card.revealedOnTurn = match.turnNumber;
   match.clue.guessesMade += 1;
@@ -213,12 +217,32 @@ export function guess(
   return { ok: true, value: outcome };
 }
 
-export function endTurn(match: MatchState, team: Team, clueId: unknown, now: number): ActionResult {
+/**
+ * Toggles an operative's "I think this one" mark on a face-down card. Marks only
+ * exist while the team is guessing and are wiped whenever the turn changes.
+ */
+export function toggleMark(match: MatchState, team: Team, playerId: string, index: unknown, clueId: unknown): ActionResult<{ marked: boolean }> {
+  if (match.phase !== 'guess' || !match.clue) return fail('WRONG_PHASE');
+  if (match.turn !== team) return fail('NOT_YOUR_TURN');
+  if (clueId !== match.clue.id) return fail('STALE_ACTION');
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= match.cards.length) {
+    return fail('CARD_INVALID');
+  }
+  if (match.cards[index].revealed) return fail('CARD_REVEALED');
+  const current = match.marks[index] ?? [];
+  const marked = !current.includes(playerId);
+  const next = marked ? [...current, playerId] : current.filter((id) => id !== playerId);
+  if (next.length) match.marks[index] = next;
+  else delete match.marks[index];
+  return { ok: true, value: { marked } };
+}
+
+export function endTurn(match: MatchState, team: Team, clueId: unknown, now: number, by?: string): ActionResult {
   if (match.phase !== 'guess' || !match.clue) return fail('WRONG_PHASE');
   if (match.turn !== team) return fail('NOT_YOUR_TURN');
   if (clueId !== match.clue.id) return fail('STALE_ACTION');
   if (match.clue.guessesMade < 1) return fail('MUST_GUESS_FIRST');
-  switchTurn(match, 'voluntary', now);
+  switchTurn(match, 'voluntary', now, by);
   return { ok: true, value: undefined };
 }
 

@@ -179,6 +179,31 @@ Standard two-team rules; there are no house rules.
 key). Nobody can switch teams mid-match. Spectators may join a team as operatives. If a spymaster
 leaves, only the host can fill the vacant seat. Settings are locked while a match is running.
 
+## Screens and room features
+
+The interface is a dark, team-tinted "spy game show" design: the page background turns deep red
+or deep teal with the active team, over a faint pattern of spy icons.
+
+- **Waiting room (lobby).** Room code masked by default (eye button to show, copy-link button),
+  team boxes with player tiles, a dashed "Şef ol" slot for a vacant spymaster seat, a live
+  "Oyun Durumu" checklist, settings, each player's profile card and lobby chat.
+- **Team names.** Every team names itself: only members of a team can rename it (pencil icon in
+  the lobby), up to 20 characters, never the same as the other team; an empty name restores the
+  default ("Kırmızı Takım" / "Mavi Takım"). Names are locked while a match runs and appear
+  everywhere (team cards, log, turn overlay, results). Colours stay red and blue.
+- **Introduction sequence (tanışma).** Optional (host toggle, on by default). Each player picks an
+  intro style (Klasik, Terminal, Pist, Parşömen, Ajan, Sahne) and a one-line intro in the lobby.
+  The host presents players one at a time; everyone else votes live (positive/negative, labels
+  depend on the style), the result screen shows the approval percentage, then the host starts the
+  match from the same screen. Votes are public and nobody can vote on themselves.
+- **Game screen.** Team cards with the remaining count and gold spymaster, the 5 × 5 board, a
+  floating clue capsule (word + − n + stepper for the spymaster; word, count and "Tahmini Bitir"
+  for operatives), a turn panel, and a log/chat tab panel. Operatives can **mark** cards with a
+  check box; teammates' names appear on the card (marks are public, cleared when the card is
+  revealed or the turn ends). Revealed cards show original illustrations per identity.
+- **Overlays.** A "Sıra X takımında" overlay on every turn change and a split-screen win
+  cinematic before the results dialog (both shortened under reduced-motion settings).
+
 ## Clue validation
 
 Implemented in [`shared/clue.ts`](shared/clue.ts), run on the server for every clue and in the
@@ -258,12 +283,13 @@ board shows words uppercased with these rules (İSTANBUL, ILIK).
 
 ## Tests
 
-`npm test` runs 50 tests in 5 files (all passing at the time of writing):
+`npm test` runs 57 tests in 6 files (all passing at the time of writing):
 
 | File | Covers |
 | --- | --- |
 | `tests/engine.test.ts` | 9/8/7/1 key across 200 seeds for each starting team; 25 unique words; invalid boards rejected; word picking without replacement; valid/invalid clues; correct guess continues; bystander, opponent and assassin outcomes; voluntary end only after a guess; count + 1 limit; 0/unlimited; win on last own agent; win for the opponent when their last agent is revealed by mistake; turn switching; duplicate, out-of-range, stale and out-of-turn guesses leave state untouched |
 | `tests/text-and-clue.test.ts` | Turkish I/ı/İ/i, NFC, folding, name cleaning, every clue rule above, count validation, word pack integrity (≥ 500 Turkish words, no folded duplicates) |
+| `tests/features.test.ts` | Team names (only own team, validation, duplicates, reset, locked mid-match), player profile (name, intro style, intro line), intro sequence (host-only control, vote rules, no self-votes, cleanup when the presented player leaves, cleared on match start), card marks (active operatives only, stale clue ids, public names, cleared on reveal and turn end) |
 | `tests/proxy.test.ts` | Rate-limit IP behind a proxy comes from the last `X-Forwarded-For` entry, so client-supplied entries cannot spoof it |
 | `tests/views.test.ts` | Projection: operatives, spectators and outsiders get no unrevealed identity and no server-only fields; both spymasters get the key; revealed cards only; everyone sees the key after the end |
 | `tests/multiplayer.test.ts` | A real server with 5 independent Socket.IO clients: joining, invalid codes, duplicate names, full rooms, one spymaster per team, host-only controls, start conditions, actions from non-members, malformed payloads, hidden information in every payload received, a complete match to victory, assassin ending, out-of-turn/out-of-role rejections, locked seats, ignored forged fields, concurrent guesses on one card, disconnect/reconnect with fresh snapshots, session replacement, rematch with fresh words, return to lobby, chat, kick, host hand-over, restart with persisted rooms and no raw tokens on disk |
@@ -331,8 +357,8 @@ Keep it running with systemd, pm2 or similar.
   spymaster from rejoining under a new name with knowledge of the key.
 - **Guest identity only.** No accounts, no match history beyond the current room, no
   spectator-only invite links.
-- **Not implemented:** turn timers, team-only chat, operatives marking cards for teammates,
-  sound effects, dark theme, an automated browser test suite.
+- **Not implemented:** turn timers, team-only chat, sound effects, a light theme, Kick/Twitch chat
+  voting, an automated browser test suite.
 
 ## Troubleshooting
 
